@@ -1,0 +1,32 @@
+# Semantic Search Implementation Plan
+
+## Goal
+To implement a retrieval endpoint that takes a user's natural language question, converts it into a vector, and queries the `pgvector` database to find the most contextually relevant document chunks.
+
+## Proposed Steps
+
+### 1. Endpoint Definition
+- Add a new endpoint `GET /documents/search` within `routers/documents.py`.
+- It will accept query parameters:
+  - `query` (str): The search text provided by the user.
+  - `limit` (int, default 3): The maximum number of relevant chunks to return.
+
+### 2. Query Embedding
+- When a search request arrives, pass the `query` string into our existing `all-MiniLM-L6-v2` embedding model.
+- This will generate a 384-dimensional floating-point array (the "query vector") representing the semantic meaning of the user's search.
+
+### 3. Vector Database Retrieval
+- Use SQLAlchemy to query the `document_chunks` table.
+- We will leverage `pgvector`'s Cosine Distance operator (`<=>`). In SQLAlchemy, this is accessed via `DocumentChunk.embedding.cosine_distance(query_vector)`.
+- The database will calculate the mathematical distance between the query vector and every stored chunk's vector, order the results from closest (most similar) to furthest, and return the top `limit` rows.
+
+### 4. Response Formatting
+- The endpoint will return a JSON list of the retrieved chunks.
+- Each item will contain:
+  - `filename`: The source document the chunk came from.
+  - `content`: The actual text snippet.
+  - `distance`: The cosine distance score (to help gauge relevance).
+
+## Open Questions for Review
+1. **Filtering**: Do you want the ability to filter searches by a specific `filename` right away, or should it search across all uploaded documents globally for now?
+2. **Thresholds**: Should we return all top `limit` results regardless of how bad the match is, or would you like to implement a maximum distance "threshold" to filter out highly irrelevant chunks?
