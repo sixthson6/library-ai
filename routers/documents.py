@@ -1,4 +1,6 @@
 import logging
+from typing import Optional
+from pydantic import BaseModel, Field
 from fastapi import APIRouter, Depends, UploadFile, File, HTTPException
 from sqlalchemy.orm import Session
 from database import get_db
@@ -34,6 +36,53 @@ def chunk_text(text: str, chunk_size: int = 1000, overlap: int = 100):
 @router.get("/")
 def list_documents():
     return {"documents": []}
+
+class SearchRequest(BaseModel):
+    payload: str
+    filename: Optional[str] = None
+    limit: int = Field(default=3, ge=1, le=20)
+    threshold: float = Field(default=0.5, description="Maximum cosine distance threshold (0.0 to 2.0). Lower is stricter.")
+
+@router.post("/search/")
+def search_documents(
+    request: SearchRequest,
+    db: Session = Depends(get_db)
+):
+    # 1. Embed the query
+    query_vector = model.encode(request.payload).tolist()
+    
+    # 2. Build the database query
+    # calculate distance
+    distance_col = DocumentChunk.embedding.cosine_distance(query_vector).label("distance")
+    
+    base_query = db.query(DocumentChunk, distance_col)
+    
+    # Apply threshold filter (lower distance means more similar)
+    base_query = base_query.filter(DocumentChunk.embedding.cosine_distance(query_vector) < request.threshold)
+    
+    # Apply filename filter if provided
+    if request.filename:
+        base_query = base_query.filter(DocumentChunk.filename == request.filename)
+        
+    # Order by distance and limit
+    results = base_query.order_by(distance_col).limit(request.limit).all()
+    
+    # 3. Format response
+    formatted_results = []
+    for chunk, distance in results:
+        formatted_results.append({
+            "id": chunk.id,
+            "filename": chunk.filename,
+            "chunk_index": chunk.chunk_index,
+            "content": chunk.content,
+            "distance": round(distance, 4)
+        })
+        
+    return {
+        "payload": request.payload,
+        "results_count": len(formatted_results),
+        "results": formatted_results
+    }
 
 @router.post("/upload/")
 async def upload_document(file: UploadFile = File(...), db: Session = Depends(get_db)):
